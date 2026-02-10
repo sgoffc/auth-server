@@ -9,10 +9,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Conexão com MongoDB
 mongoose.connect(process.env.MONGO_URL)
   .then(() => console.log("MongoDB conectado"))
   .catch(err => console.error(err));
 
+// Modelo do usuário
 const UserSchema = new mongoose.Schema({
   email: { type: String, unique: true },
   password: String,
@@ -25,54 +27,58 @@ const User = mongoose.model("User", UserSchema);
 
 /* REGISTRO */
 app.post("/register", async (req, res) => {
-  const { email, password, name, avatar } = req.body;
+  try {
+    const { email, password, name, avatar } = req.body;
 
-  const exists = await User.findOne({ email });
-  if (exists) {
-    return res.status(400).json({ error: "Email já cadastrado" });
+    if (!email || !password || !name)
+      return res.status(400).json({ error: "Preencha todos os campos" });
+
+    const exists = await User.findOne({ email });
+    if (exists) return res.status(400).json({ error: "Email já cadastrado" });
+
+    const hash = await bcrypt.hash(password, 10);
+
+    const user = await User.create({ email, password: hash, name, avatar });
+
+    res.json({ success: true, user: { id: user._id, name: user.name, avatar: user.avatar } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Erro no servidor" });
   }
-
-  const hash = await bcrypt.hash(password, 10);
-
-  const user = await User.create({
-    email,
-    password: hash,
-    name,
-    avatar
-  });
-
-  res.json({ success: true });
 });
 
 /* LOGIN */
 app.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  const user = await User.findOne({ email });
-  if (!user) {
-    return res.status(400).json({ error: "Usuário não encontrado" });
+    if (!email || !password)
+      return res.status(400).json({ error: "Preencha todos os campos" });
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(400).json({ error: "Usuário não encontrado" });
+
+    const ok = await bcrypt.compare(password, user.password);
+    if (!ok) return res.status(401).json({ error: "Senha inválida" });
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
+
+    res.json({
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        avatar: user.avatar
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Erro no servidor" });
   }
-
-  const ok = await bcrypt.compare(password, user.password);
-  if (!ok) {
-    return res.status(401).json({ error: "Senha inválida" });
-  }
-
-  const token = jwt.sign(
-    { id: user._id },
-    process.env.JWT_SECRET
-  );
-
-  res.json({
-    token,
-    user: {
-      id: user._id,
-      name: user.name,
-      avatar: user.avatar
-    }
-  });
 });
 
-app.listen(3000, () => {
-  console.log("Servidor rodando");
-});
+// Teste do servidor
+app.get("/", (req, res) => res.send("Servidor OK"));
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
